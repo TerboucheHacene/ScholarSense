@@ -8,11 +8,16 @@ readme = "README.md"
 packages = [ { include = "scholar_sense", from = "src" } ]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = ">=3.9,<3.9.7 || >3.9.7,<4.0"
 arxiv = "^1.4.8"
 pandas = "^2.0.3"
 tqdm = "^4.65.0"
 nltk = "^3.8.1"
+docarray = {extras = ["annlite"], version = "^0.36.0"}
+torch = { version="^1.13.0", extras=["cuda116"] }
+torchvision = { version="^0.14", extras=["cuda116"] }
+sentence-transformers = "^2.2.2"
+streamlit = "^1.25.0"
 
 [tool.poe.tasks]
 force-cuda113 = "python -m pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1+cu113 -f https://download.pytorch.org/whl/torch_stable.html"
@@ -31,7 +36,7 @@ wordcloud = "^1.9.2"
 
 
 [tool.poetry.group.lint.dependencies]
-black = "^22.8"
+black = {extras = ["jupyter"], version = "^23.7.0"}
 flake8 = "^5.0"
 isort = "^5.10"
 mypy = ">=0.991"
