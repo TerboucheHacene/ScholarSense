@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import datetime
 import json
 import os
-from dataclasses import dataclass
-from typing import List
+from dataclasses import Field, dataclass
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -13,26 +15,19 @@ class Paper:
     authors: List[str]
     categories: List[str]
     primary_category: str
-    doi: str
-    journal_reference: str
-    pdf_url: str
     created: datetime.date
     updated: datetime.date
     obtained: datetime.date
-    file_name: str = None
+    doi: Optional[str] = Field(default=None)
+    journal_reference: Optional[str] = Field(default=None)
+    pdf_url: Optional[str] = Field(default=None)
+    file_name: str = Field(init=False)
 
     def __post_init__(self):
         # http://arxiv.org/abs/2306.12881v1 -> 2306.12881v1
         self.file_name = self.id.rsplit("/", 1)[-1]
-        # convert datetime.datetime to datetime.date
-        if isinstance(self.created, datetime.datetime):
-            self.created = self.created.strftime("%Y-%m-%d %H:%M:%S")
-        if isinstance(self.updated, datetime.datetime):
-            self.updated = self.updated.strftime("%Y-%m-%d %H:%M:%S")
-        if isinstance(self.obtained, datetime.date):
-            self.obtained = self.obtained.strftime("%Y-%m-%d %H:%M:%S")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"Paper(id={self.id}, title={self.title}, abstract={self.abstract[:20]}",
             f"authors={self.authors}, categories={self.categories},",
@@ -42,19 +37,27 @@ class Paper:
         )
 
     @classmethod
-    def from_json(self, json_file):
+    def from_json(cls, json_file: str) -> "Paper":
         with open(json_file, "r") as f:
             data = json.load(f)
-        return Paper(**data)
+        return cls(**data)
 
-    def to_json(self, json_path):
+    def to_json(self, json_path: str) -> None:
+        # convert datetime.datetime to datetime.date
+        if isinstance(self.created, datetime.datetime):
+            self.created = self.created.strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(self.updated, datetime.datetime):
+            self.updated = self.updated.strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(self.obtained, datetime.date):
+            self.obtained = self.obtained.strftime("%Y-%m-%d %H:%M:%S")
+
         json_file = os.path.join(json_path, self.file_name + ".json")
         with open(json_file, "w") as f:
             json.dump(self.__dict__, f, indent=4)
 
-    def to_dict(self):
+    def to_dict(self) -> Dict:
         return self.__dict__
 
     @classmethod
-    def from_dict(self, dict):
-        return Paper(**dict)
+    def from_dict(cls, dict: Dict) -> "Paper":
+        return cls(**dict)
