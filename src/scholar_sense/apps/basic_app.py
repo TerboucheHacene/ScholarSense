@@ -1,3 +1,13 @@
+"""The module contains the basic app for ScholarSense.
+
+In this first version, the app is very simple.
+* The embeddings are precomputed and stored in a pickle file.
+* The app loads the embeddings and the dataframe containing the papers' metadata.
+* Then, it uses the Transformer model to calculate the similarity between the
+query and the papers' abstracts using `util.cos_sim`.
+* It then displays the top-k papers that are the most similar to the query using the
+`torch.topk` function.
+"""
 import os
 from pathlib import Path
 
@@ -121,5 +131,5 @@ def main(
 if __name__ == "__main__":
     db_path = Path("/home/hacene/Documents/workspace/ScholarSense/artifacts/data/")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_name = "all-MiniLM-L6-v2"
+    model_name = "roberta-large-nli-stsb-mean-tokens"
     main(db_path=db_path, model_name=model_name, device=device, topk=20)
