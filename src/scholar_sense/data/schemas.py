@@ -3,8 +3,11 @@ from __future__ import annotations
 import datetime
 import json
 import os
-from dataclasses import Field, dataclass
+from dataclasses import dataclass
 from typing import Dict, List, Optional
+
+from docarray import BaseDoc
+from docarray.typing import TorchTensor
 
 
 @dataclass
@@ -18,10 +21,10 @@ class Paper:
     created: datetime.date
     updated: datetime.date
     obtained: datetime.date
-    doi: Optional[str] = Field(default=None)
-    journal_reference: Optional[str] = Field(default=None)
-    pdf_url: Optional[str] = Field(default=None)
-    file_name: str = Field(init=False)
+    file_name: str
+    doi: Optional[str] = None
+    journal_reference: Optional[str] = None
+    pdf_url: Optional[str] = None
 
     def __post_init__(self):
         # http://arxiv.org/abs/2306.12881v1 -> 2306.12881v1
@@ -61,3 +64,27 @@ class Paper:
     @classmethod
     def from_dict(cls, dict: Dict) -> "Paper":
         return cls(**dict)
+
+
+class DocPaper(BaseDoc):
+    id: str
+    title: str
+    abstract: str
+    authors: List[str]
+    categories: List[str]
+    primary_category: str
+    created: str
+    updated: str
+    obtained: str
+    filename: Optional[str]
+    pdf_url: Optional[str]
+    doi: Optional[str]
+    journal_reference: Optional[str]
+    embedding: Optional[TorchTensor]
+
+    @classmethod
+    def from_json(cls, path: str) -> "DocPaper":
+        with open(path, "r") as f:
+            data = json.load(f)
+        data["id"] = data["id"].rsplit("/", 1)[-1]
+        return cls(**data)
