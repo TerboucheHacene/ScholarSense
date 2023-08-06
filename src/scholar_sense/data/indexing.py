@@ -1,6 +1,10 @@
 import logging
 import os
+import pickle
+from typing import List
 
+import pandas as pd
+import torch
 from docarray import DocVec
 from docarray.index.backends.in_memory import InMemoryExactNNIndex
 
@@ -52,7 +56,7 @@ class Indexer:
             )
         else:
             self.encoding_method = encoding_method
-        self.embedding_model = EmbeddingModel(model_name=self.model_name)
+        self.embedding_model = EmbeddingModel(model_name=self.model_name, **kwargs)
 
     def run(self, index_file_path: str):
         docs = self.create_doc_vec()
@@ -95,3 +99,69 @@ class Indexer:
         docs_index.index(docs)
         docs_index.persist()
         return docs_index
+
+
+class Embedder:
+    COLUMNS = ["title", "abstract"]
+    ENCODING_METHODS = ["title", "abstract", "concat"]
+    MODELS = [
+        "all-MiniLM-L6-v2",
+        "bert-base-nli-mean-tokens",
+        "roberta-base-nli-mean-tokens",
+        "distilbert-base-nli-mean-tokens",
+        "distilbert-base-nli-stsb-mean-tokens",
+        "roberta-base-nli-stsb-mean-tokens",
+    ]
+
+    def __init__(self, model_name: str, encoding_method: str, **kwargs):
+        if model_name not in self.MODELS:
+            raise ValueError(f"Invalid model name. Must be one of {self.MODELS}")
+        self.model_name = model_name
+        self.embedding_model = EmbeddingModel(model_name=self.model_name, **kwargs)
+        if encoding_method not in self.ENCODING_METHODS:
+            raise ValueError(
+                f"Invalid encoding method. Must be one of {self.ENCODING_METHODS}"
+            )
+        self.encoding_method = encoding_method
+
+    def run(self, df_path: str, output_path: str):
+        if os.path.exists(output_path):
+            logging.warning(f"Output file {output_path} already exists. Deleting...")
+            os.remove(output_path)
+        df = self.read_data(df_path)
+        text_to_encode = self.get_text_to_encode(df)
+        embeddings = self.encode(text_to_encode)
+        self.save(embeddings, output_path)
+
+    def read_data(self, df_path) -> pd.DataFrame:
+        df = pd.read_csv(df_path)
+        for col in self.COLUMNS:
+            if col not in df.columns:
+                raise ValueError(f"Column {col} not found in {df_path}")
+        df = df[[col for col in self.COLUMNS]]
+        return df
+
+    def get_text_to_encode(self, df: pd.DataFrame) -> List[str]:
+        text_to_encode = []
+        for _, row in df.iterrows():
+            if self.encoding_method == "title":
+                text_to_encode.append(row["title"])
+            elif self.encoding_method == "abstract":
+                text_to_encode.append(row["abstract"])
+            elif self.encoding_method == "concat":
+                text_to_encode.append(f"{row['title']} [SEP] {row['abstract']}")
+        return text_to_encode
+
+    def encode(self, text_to_encode: List[str]) -> torch.Tensor:
+        return self.embedding_model.encode_sentences(text_to_encode)
+
+    @staticmethod
+    def save(embeddings: torch.Tensor, output_path: str):
+        with open(output_path, "wb") as f:
+            pickle.dump(embeddings, f)
+
+    @staticmethod
+    def load(embeddings_path: str) -> torch.Tensor:
+        with open(embeddings_path, "rb") as f:
+            embeddings = pickle.load(f)
+        return embeddings
