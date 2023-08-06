@@ -16,8 +16,8 @@ import torch
 from sentence_transformers import util
 
 from scholar_sense.apps.constants import ABOUT, BACKGROUND_URL_IMAGE, HOW_TO_USE, MADE_BY
+from scholar_sense.apps.utils import add_bg_from_url
 from scholar_sense.data.indexing import Embedder
-from scholar_sense.utils import add_bg_from_url
 
 
 def main(

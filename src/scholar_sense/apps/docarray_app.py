@@ -6,9 +6,9 @@ import streamlit as st
 from docarray.index.backends.in_memory import InMemoryExactNNIndex
 
 from scholar_sense.apps.constants import ABOUT, BACKGROUND_URL_IMAGE, HOW_TO_USE, MADE_BY
+from scholar_sense.apps.utils import add_bg_from_url
 from scholar_sense.data.schemas import DocPaper
 from scholar_sense.nn.models import EmbeddingModel
-from scholar_sense.utils import add_bg_from_url
 
 
 def main(index_file_path: str, model_name: str, topK: int):
