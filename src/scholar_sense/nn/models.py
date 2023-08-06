@@ -1,3 +1,5 @@
+from typing import List, Union
+
 import torch
 import torch.nn as nn
 from docarray import DocVec
@@ -112,7 +114,7 @@ class EmbeddingModel(nn.Module):
         return docs
 
     @torch.no_grad()
-    def encode_sentence(self, sentences: str) -> torch.Tensor:
+    def encode_sentences(self, sentences: Union[str, List[str]]) -> torch.Tensor:
         return self.model.encode(
             sentences=sentences,
             batch_size=self.batch_size,

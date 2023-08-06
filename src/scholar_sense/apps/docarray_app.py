@@ -54,7 +54,7 @@ def main(index_file_path: str, model_name: str, topK: int):
             st.session_state["paper_recommendations"] = None
             st.session_state["order_indices"] = None
         else:
-            query_embedding = embedding_model.encode_sentence([query])
+            query_embedding = embedding_model.encode_sentences([query])
             items, _ = doc_index.find(
                 query_embedding, search_field="embedding", limit=topK
             )
