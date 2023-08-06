@@ -1,27 +1,6 @@
 import base64
-import pickle
 
-import numpy as np
-import pandas as pd
 import streamlit as st
-from sentence_transformers import SentenceTransformer
-
-
-def read_data(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path)
-    df = df[["title", "abstract", "pdf_url", "created"]]
-    return df
-
-
-def get_embeddings_data(path: str) -> np.array:
-    with open(path, "rb") as f:
-        embeddings = pickle.load(f)
-    return embeddings
-
-
-def get_model(model_name: str = "all-MiniLM-L6-v2") -> SentenceTransformer:
-    model = SentenceTransformer(model_name)
-    return model
 
 
 def add_bg_from_url(url: str) -> None:

@@ -16,19 +16,14 @@ import torch
 from sentence_transformers import util
 
 from scholar_sense.apps.constants import ABOUT, BACKGROUND_URL_IMAGE, HOW_TO_USE, MADE_BY
-from scholar_sense.utils import (
-    add_bg_from_url,
-    get_embeddings_data,
-    get_model,
-    read_data,
-)
+from scholar_sense.data.indexing import Embedder
+from scholar_sense.utils import add_bg_from_url
 
 
 def main(
     db_path: str,
     topk: int,
     model_name: str,
-    device: torch.device,
 ) -> None:
     st.set_page_config(
         page_title="ScholarSense",
@@ -54,9 +49,9 @@ def main(
         st.markdown(html_temp.format("rgba(55, 53, 47, 0.16)"), unsafe_allow_html=True)
         st.markdown(MADE_BY, unsafe_allow_html=True)
 
-    embeddings = get_embeddings_data(os.path.join(db_path, "arxiv_embeddings.pkl"))
-    df = read_data(os.path.join(db_path, "arxiv.csv"))
-    model = get_model(model_name=model_name)
+    embedder = Embedder(model_name, "title")
+    df = embedder.read_data(os.path.join(db_path, "arxiv.csv"))
+    embeddings = embedder.load(os.path.join(db_path, "arxiv_embeddings.pkl"))
 
     if "paper_recommendations" not in st.session_state:
         st.session_state["paper_recommendations"] = None
@@ -75,9 +70,7 @@ def main(
             st.session_state["paper_recommendations"] = None
             st.session_state["order_indices"] = None
         else:
-            query_embedding = model.encode(
-                query, convert_to_tensor=True, device=device, normalize_embeddings=True
-            )
+            query_embedding = embedder.embedding_model.encode_sentences(query)
             cosine_scores = util.cos_sim(embeddings, query_embedding)
             search_hits = torch.topk(cosine_scores, dim=0, k=topk, sorted=True).indices
             search_hits = search_hits.cpu().numpy().squeeze()
@@ -112,6 +105,5 @@ def main(
 
 if __name__ == "__main__":
     db_path = Path("/home/hacene/Documents/workspace/ScholarSense/artifacts/data/")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_name = "roberta-large-nli-stsb-mean-tokens"
-    main(db_path=db_path, model_name=model_name, device=device, topk=20)
+    main(db_path=db_path, model_name=model_name, topk=20)
