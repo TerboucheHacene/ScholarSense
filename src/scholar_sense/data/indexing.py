@@ -1,33 +1,22 @@
 import logging
 import os
 import pickle
+from abc import ABC, abstractmethod
 from typing import List
 
 import pandas as pd
 import torch
 from docarray import DocVec
+from docarray.index import QdrantDocumentIndex
+from docarray.index.abstract import BaseDocIndex
 from docarray.index.backends.in_memory import InMemoryExactNNIndex
 
 from scholar_sense.data.schemas import DocPaper
 from scholar_sense.nn.models import EmbeddingModel
 
 
-class Indexer:
-    """Class to index the papers in the database.
-
-    Attributes
-    ----------
-    db_path : str
-        Path to the directory containing the JSON files of the papers.
-    model_name : str
-        Name of the model to use for embedding the papers.
-    encoding_method : str
-        Method to use for encoding the papers.
-    embedding_model : EmbeddingModel
-        Instance of the EmbeddingModel class.
-    """
-
-    ENCODING_METHODS = [
+class BaseIndexer(ABC):
+    ENCODINGS_METHODS = [
         "title",
         "abstract",
         "mean",
@@ -50,18 +39,18 @@ class Indexer:
             raise ValueError(f"Invalid model name. Must be one of {self.MODELS}")
         else:
             self.model_name = model_name
-        if encoding_method not in self.ENCODING_METHODS:
+        if encoding_method not in self.ENCODINGS_METHODS:
             raise ValueError(
-                f"Invalid encoding method. Must be one of {self.ENCODING_METHODS}"
+                f"Invalid encoding method. Must be one of {self.ENCODINGS_METHODS}"
             )
         else:
             self.encoding_method = encoding_method
         self.embedding_model = EmbeddingModel(model_name=self.model_name, **kwargs)
 
-    def run(self, index_file_path: str):
+    def run(self, **kwargs) -> BaseDocIndex:
         docs = self.create_doc_vec()
         docs = self.embed_data(docs)
-        docs_index = self.create_index(index_file_path, docs)
+        docs_index = self.create_index(docs, **kwargs)
         return docs_index
 
     def embed_data(self, docs: DocVec[DocPaper]) -> DocVec[DocPaper]:
@@ -89,6 +78,29 @@ class Indexer:
         )
         return docs
 
+    @abstractmethod
+    def create_index(self, docs: DocVec[DocPaper], **kwargs):
+        raise NotImplementedError("This method should be implemented in a child class.")
+
+
+class InMemoryIndexer(BaseIndexer):
+    """Class to index the papers in the database.
+
+    Attributes
+    ----------
+    db_path : str
+        Path to the directory containing the JSON files of the papers.
+    model_name : str
+        Name of the model to use for embedding the papers.
+    encoding_method : str
+        Method to use for encoding the papers.
+    embedding_model : EmbeddingModel
+        Instance of the EmbeddingModel class.
+    """
+
+    def __init__(self, db_path: str, model_name: str, encoding_method: str, **kwargs):
+        super().__init__(db_path, model_name, encoding_method, **kwargs)
+
     def create_index(
         self, index_file_path: str, docs: DocVec[DocPaper]
     ) -> InMemoryExactNNIndex:
@@ -98,6 +110,33 @@ class Indexer:
         docs_index = InMemoryExactNNIndex(index_file_path=index_file_path)
         docs_index.index(docs)
         docs_index.persist()
+        return docs_index
+
+
+class QdrantIndexer(BaseIndexer):
+    def __init__(self, db_path: str, model_name: str, encoding_method: str, **kwargs):
+        super().__init__(db_path, model_name, encoding_method, **kwargs)
+
+    def create_index(
+        self,
+        docs: DocVec[DocPaper],
+        host: str,
+        port: int,
+        collection_name: str,
+    ) -> QdrantDocumentIndex:
+        qdarnt_config = QdrantDocumentIndex.DBConfig(
+            host=host,
+            port=port,
+            collection_name=collection_name,
+            default_column_config={
+                "id": {},
+                "vector": {"dim": self.embedding_model.embedding_size},
+                "payload": {},
+            },
+        )
+
+        docs_index = QdrantDocumentIndex[DocPaper](qdarnt_config)
+        docs_index.index(docs)
         return docs_index
 
 
