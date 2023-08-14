@@ -23,6 +23,16 @@ class EmbeddingModel(nn.Module):
         self.batch_size = batch_size
         self.normalize_embeddings = normalize_embeddings
         self.words_sequence_length = words_sequence_length
+        self._embedding_size = self.model.get_sentence_embedding_dimension()
+        self._sequence_length = self.model.get_max_seq_length()
+
+    @property
+    def embedding_size(self):
+        return self._embedding_size
+
+    @property
+    def sequence_length(self):
+        return self._sequence_length
 
     @torch.no_grad()
     def encode_mean(self, docs: DocVec[DocPaper]) -> DocVec[DocPaper]:
