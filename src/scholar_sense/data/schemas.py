@@ -70,8 +70,8 @@ class DocPaper(BaseDoc):
     id: str
     title: str
     abstract: str
-    authors: List[str]
-    categories: List[str]
+    # authors: List[str]
+    # categories: List[str]
     primary_category: str
     created: str
     updated: str
@@ -87,4 +87,6 @@ class DocPaper(BaseDoc):
         with open(path, "r") as f:
             data = json.load(f)
         data["id"] = data["id"].rsplit("/", 1)[-1]
+        del data["categories"]
+        del data["authors"]
         return cls(**data)
