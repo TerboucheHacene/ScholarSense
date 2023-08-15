@@ -11,10 +11,14 @@ from docarray.index.backends.in_memory import InMemoryExactNNIndex
 from scholar_sense.apps.constants import ABOUT, BACKGROUND_URL_IMAGE, HOW_TO_USE, MADE_BY
 from scholar_sense.apps.utils import add_bg_from_url
 from scholar_sense.data.schemas import DocPaper
-from scholar_sense.nn.models import EmbeddingModel
+from scholar_sense.nn.models import SentenceTransformerEmbeddingModel
 
 
-def main(doc_index: BaseDocIndex, embedding_model: EmbeddingModel, topK: int):
+def main(
+    doc_index: BaseDocIndex,
+    embedding_model: SentenceTransformerEmbeddingModel,
+    topK: int,
+):
     st.set_page_config(
         page_title="ScholarSense",
         page_icon="📚",
@@ -57,7 +61,7 @@ def main(doc_index: BaseDocIndex, embedding_model: EmbeddingModel, topK: int):
             # Clear previous results before adding new ones
             st.session_state["paper_recommendations"] = defaultdict(lambda: [])
             st.session_state["order_indices"] = []
-            query_embedding = embedding_model.encode_sentences(query)
+            query_embedding = embedding_model.encode_sentence(query)
             items, _ = doc_index.find(
                 query_embedding, search_field="embedding", limit=topK
             )
@@ -104,14 +108,18 @@ def main_in_memory(topK: int):
     )
     model_name = "all-MiniLM-L6-v2"
     doc_index = InMemoryExactNNIndex[DocPaper](index_file_path=index_file_path)
-    embedding_model = EmbeddingModel(model_name=model_name)
+    embedding_model = SentenceTransformerEmbeddingModel(
+        model_name=model_name, encoding_method="title"
+    )
     main(doc_index=doc_index, embedding_model=embedding_model, topK=topK)
 
 
 def main_qdrant(topK: int):
     model_name = "all-MiniLM-L6-v2"
     collection_name = "papers"
-    embedding_model = EmbeddingModel(model_name=model_name)
+    embedding_model = SentenceTransformerEmbeddingModel(
+        model_name=model_name, encoding_method="title"
+    )
     doc_index = QdrantDocumentIndex[DocPaper](
         host=os.getenv("QDRANT_HOST", "localhost"),
         port=int(os.getenv("QDRANT_PORT", 6333)),
