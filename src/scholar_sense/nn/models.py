@@ -1,7 +1,9 @@
-from typing import List, Union
+import logging
+import os
+from abc import ABC, abstractmethod, abstractproperty
 
+import openai
 import torch
-import torch.nn as nn
 from docarray import DocVec
 from sentence_transformers import SentenceTransformer
 from tqdm.autonotebook import trange
@@ -9,15 +11,139 @@ from tqdm.autonotebook import trange
 from scholar_sense.data.schemas import DocPaper
 
 
-class EmbeddingModel(nn.Module):
+class EmbeddingModel(ABC):
+    def __init__(self) -> None:
+        super().__init__()
+
+    @abstractproperty
+    def embedding_size(self):
+        pass
+
+    @abstractproperty
+    def sequence_length(self):
+        pass
+
+    @abstractmethod
+    def encode(self, docs: DocVec[DocPaper]) -> DocVec[DocPaper]:
+        pass
+
+    @abstractmethod
+    def encode_sentence(self, text: str) -> torch.Tensor:
+        pass
+
+
+class OpenAIEmbeddingModel(EmbeddingModel):
+    MODELS = [
+        "text-embedding-ada-002",
+        "text-search-davinci-001",
+        "text-search-curie-001",
+        "text-search-babbage-001",
+        "text-search-ada-001",
+    ]
+    EMBEDDING_SIZES = {
+        "text-embedding-ada-002": 1536,
+        "text-search-davinci-001": 12288,
+        "text-search-curie-001": 4096,
+        "text-search-babbage-001": 2048,
+        "text-search-ada-001": 1024,
+    }
+    SEQUENCE_LENGTHS = {
+        "text-embedding-ada-002": 8191,
+        "text-search-davinci-001": 2046,
+        "text-search-curie-001": 2046,
+        "text-search-babbage-001": 2046,
+        "text-search-ada-001": 2046,
+    }
+
+    def __init__(self, model_name: str) -> None:
+        if model_name not in self.MODELS:
+            raise ValueError(
+                f"Model name must be one of {self.MODELS}, got {model_name}."
+            )
+        self.model_name = model_name
+        try:
+            openai.api_key = os.getenv("OPENAI_API_KEY")
+        except KeyError:
+            raise KeyError(
+                "Please set OPENAI_API_KEY environment variable to use OpenAI API."
+            )
+        try:
+            self._embedding_size = self.EMBEDDING_SIZES[model_name]
+        except KeyError:
+            raise KeyError(
+                f"Embedding size for model {model_name} not found. Please add it to the"
+                "EMBEDDING_SIZES dictionary."
+            )
+        try:
+            self._sequence_length = self.SEQUENCE_LENGTHS[model_name]
+        except KeyError:
+            raise KeyError(
+                f"Sequence length for model {model_name} not found. Please add it to the"
+                "SEQUENCE_LENGTHS dictionary."
+            )
+
+    @property
+    def embedding_size(self):
+        return self._embedding_size
+
+    @property
+    def sequence_length(self):
+        return self._sequence_length
+
+    def encode(self, docs: DocVec[DocPaper]) -> DocVec[DocPaper]:
+        docs.embedding = torch.zeros((len(docs), self.embedding_size))
+        logging.info("Encoding OpenAI")
+        for index in trange(0, len(docs), 1, desc="Encoding OpenAI"):
+            text = docs.title[index] + docs.abstract[index]
+            docs.embedding[index] = self.encode_sentence(text)
+        torch.save(docs.embedding, "openai_embeddings.pt")
+        return docs
+
+    def encode_sentence(self, text: str) -> torch.Tensor:
+        text = text.replace("\n", " ")
+        emb = openai.Embedding.create(input=[text], model=self.model_name)["data"][0][
+            "embedding"
+        ]
+        emb = torch.tensor(emb)
+        return emb
+
+
+class SentenceTransformerEmbeddingModel(EmbeddingModel):
+    ENCODINGS_METHODS = [
+        "title",
+        "abstract",
+        "mean",
+        "concat",
+        "sliding_window_abstract",
+        "sliding_window_mean",
+    ]
+    MODELS = [
+        "all-MiniLM-L6-v2",
+        "bert-base-nli-mean-tokens",
+        "roberta-base-nli-mean-tokens",
+        "distilbert-base-nli-mean-tokens",
+        "distilbert-base-nli-stsb-mean-tokens",
+        "roberta-base-nli-stsb-mean-tokens",
+    ]
+
     def __init__(
         self,
-        model_name: str = "bert-base-nli-mean-tokens",
+        model_name: str,
+        encoding_method: str,
         batch_size: int = 256,
         normalize_embeddings: bool = True,
         words_sequence_length: int = 300,
     ) -> None:
         super().__init__()
+        if encoding_method not in self.ENCODINGS_METHODS:
+            raise ValueError(
+                f"Encoding method must be one of {self.ENCODINGS_METHODS}, got {encoding_method}."  # noqa
+            )
+        if model_name not in self.MODELS:
+            raise ValueError(
+                f"Model name must be one of {self.MODELS}, got {model_name}."
+            )
+
         self.model = SentenceTransformer(model_name)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.batch_size = batch_size
@@ -33,6 +159,32 @@ class EmbeddingModel(nn.Module):
     @property
     def sequence_length(self):
         return self._sequence_length
+
+    def encode(self, docs: DocVec[DocPaper]) -> DocVec[DocPaper]:
+        if self.encoding_method == "title":
+            docs = self.embedding_model.encode_title(docs)
+        elif self.encoding_method == "abstract":
+            docs = self.embedding_model.encode_abstract(docs)
+        elif self.encoding_method == "mean":
+            docs = self.embedding_model.encode_mean(docs)
+        elif self.encoding_method == "concat":
+            docs = self.embedding_model.encode_concat(docs)
+        elif self.encoding_method == "sliding_window_abstract":
+            docs = self.embedding_model.encode_sliding_window_abstract(docs)
+        elif self.encoding_method == "sliding_window_mean":
+            docs = self.embedding_model.encode_sliding_window_mean(docs)
+        return docs
+
+    @torch.no_grad()
+    def encode_sentence(self, text: str) -> torch.Tensor:
+        return self.model.encode(
+            sentences=text,
+            batch_size=1,
+            show_progress_bar=False,
+            convert_to_tensor=True,
+            device=self.device,
+            normalize_embeddings=self.normalize_embeddings,
+        ).cpu()
 
     @torch.no_grad()
     def encode_mean(self, docs: DocVec[DocPaper]) -> DocVec[DocPaper]:
@@ -58,7 +210,6 @@ class EmbeddingModel(nn.Module):
             / 2
         ).cpu()
         return docs
-        # concat title and abstract
 
     @torch.no_grad()
     def encode_concat(self, docs: DocVec[DocPaper]) -> DocVec[DocPaper]:
@@ -122,17 +273,6 @@ class EmbeddingModel(nn.Module):
         ).cpu()
         docs.embedding = (abstract_embeddings + title_embeddings) / 2
         return docs
-
-    @torch.no_grad()
-    def encode_sentences(self, sentences: Union[str, List[str]]) -> torch.Tensor:
-        return self.model.encode(
-            sentences=sentences,
-            batch_size=self.batch_size,
-            show_progress_bar=False,
-            convert_to_tensor=True,
-            device=self.device,
-            normalize_embeddings=self.normalize_embeddings,
-        ).cpu()
 
     @torch.no_grad()
     def encode_sentence_sliding_window(self, sentences: str) -> torch.Tensor:
