@@ -12,61 +12,34 @@ from docarray.index.abstract import BaseDocIndex
 from docarray.index.backends.in_memory import InMemoryExactNNIndex
 
 from scholar_sense.data.schemas import DocPaper
-from scholar_sense.nn.models import EmbeddingModel
+from scholar_sense.nn.models import (
+    OpenAIEmbeddingModel,
+    SentenceTransformerEmbeddingModel,
+)
 
 
 class BaseIndexer(ABC):
-    ENCODINGS_METHODS = [
-        "title",
-        "abstract",
-        "mean",
-        "concat",
-        "sliding_window_abstract",
-        "sliding_window_mean",
-    ]
-    MODELS = [
-        "all-MiniLM-L6-v2",
-        "bert-base-nli-mean-tokens",
-        "roberta-base-nli-mean-tokens",
-        "distilbert-base-nli-mean-tokens",
-        "distilbert-base-nli-stsb-mean-tokens",
-        "roberta-base-nli-stsb-mean-tokens",
-    ]
-
-    def __init__(self, db_path: str, model_name: str, encoding_method: str, **kwargs):
+    def __init__(
+        self,
+        db_path: str,
+        use_openai: bool,
+        model_name: str,
+        encoding_method: str = None,
+        **kwargs,
+    ):
         self.db_path = db_path
-        if model_name not in self.MODELS:
-            raise ValueError(f"Invalid model name. Must be one of {self.MODELS}")
+        if use_openai:
+            self.embedding_model = OpenAIEmbeddingModel(model_name=model_name)
         else:
-            self.model_name = model_name
-        if encoding_method not in self.ENCODINGS_METHODS:
-            raise ValueError(
-                f"Invalid encoding method. Must be one of {self.ENCODINGS_METHODS}"
+            self.embedding_model = SentenceTransformerEmbeddingModel(
+                model_name=model_name, encoding_method=encoding_method, **kwargs
             )
-        else:
-            self.encoding_method = encoding_method
-        self.embedding_model = EmbeddingModel(model_name=self.model_name, **kwargs)
 
     def run(self, **kwargs) -> BaseDocIndex:
         docs = self.create_doc_vec()
-        docs = self.embed_data(docs)
+        docs = self.embedding_model.encode(docs)
         docs_index = self.create_index(docs, **kwargs)
         return docs_index
-
-    def embed_data(self, docs: DocVec[DocPaper]) -> DocVec[DocPaper]:
-        if self.encoding_method == "title":
-            docs = self.embedding_model.encode_title(docs)
-        elif self.encoding_method == "abstract":
-            docs = self.embedding_model.encode_abstract(docs)
-        elif self.encoding_method == "mean":
-            docs = self.embedding_model.encode_mean(docs)
-        elif self.encoding_method == "concat":
-            docs = self.embedding_model.encode_concat(docs)
-        elif self.encoding_method == "sliding_window_abstract":
-            docs = self.embedding_model.encode_sliding_window_abstract(docs)
-        elif self.encoding_method == "sliding_window_mean":
-            docs = self.embedding_model.encode_sliding_window_mean(docs)
-        return docs
 
     def create_doc_vec(self) -> DocVec[DocPaper]:
         json_files = [f for f in os.listdir(self.db_path) if f.endswith(".json")]
@@ -94,12 +67,19 @@ class InMemoryIndexer(BaseIndexer):
         Name of the model to use for embedding the papers.
     encoding_method : str
         Method to use for encoding the papers.
-    embedding_model : EmbeddingModel
-        Instance of the EmbeddingModel class.
+    embedding_model : SentenceTransformerEmbeddingModel
+        Instance of the SentenceTransformerEmbeddingModel class.
     """
 
-    def __init__(self, db_path: str, model_name: str, encoding_method: str, **kwargs):
-        super().__init__(db_path, model_name, encoding_method, **kwargs)
+    def __init__(
+        self,
+        db_path: str,
+        use_openai: bool,
+        model_name: str,
+        encoding_method: str,
+        **kwargs,
+    ):
+        super().__init__(db_path, use_openai, model_name, encoding_method, **kwargs)
 
     def create_index(
         self, index_file_path: str, docs: DocVec[DocPaper]
@@ -114,15 +94,22 @@ class InMemoryIndexer(BaseIndexer):
 
 
 class QdrantIndexer(BaseIndexer):
-    def __init__(self, db_path: str, model_name: str, encoding_method: str, **kwargs):
-        super().__init__(db_path, model_name, encoding_method, **kwargs)
+    def __init__(
+        self,
+        db_path: str,
+        use_openai: bool,
+        model_name: str,
+        encoding_method: str,
+        **kwargs,
+    ):
+        super().__init__(db_path, use_openai, model_name, encoding_method, **kwargs)
 
     def create_index(
         self,
-        docs: DocVec[DocPaper],
         host: str,
         port: int,
         collection_name: str,
+        docs: DocVec[DocPaper],
     ) -> QdrantDocumentIndex:
         qdarnt_config = QdrantDocumentIndex.DBConfig(
             host=host,
@@ -143,24 +130,11 @@ class QdrantIndexer(BaseIndexer):
 class Embedder:
     COLUMNS = ["title", "abstract"]
     ENCODING_METHODS = ["title", "abstract", "concat"]
-    MODELS = [
-        "all-MiniLM-L6-v2",
-        "bert-base-nli-mean-tokens",
-        "roberta-base-nli-mean-tokens",
-        "distilbert-base-nli-mean-tokens",
-        "distilbert-base-nli-stsb-mean-tokens",
-        "roberta-base-nli-stsb-mean-tokens",
-    ]
 
     def __init__(self, model_name: str, encoding_method: str, **kwargs):
-        if model_name not in self.MODELS:
-            raise ValueError(f"Invalid model name. Must be one of {self.MODELS}")
-        self.model_name = model_name
-        self.embedding_model = EmbeddingModel(model_name=self.model_name, **kwargs)
-        if encoding_method not in self.ENCODING_METHODS:
-            raise ValueError(
-                f"Invalid encoding method. Must be one of {self.ENCODING_METHODS}"
-            )
+        self.embedding_model = SentenceTransformerEmbeddingModel(
+            model_name=model_name, encoding_method=encoding_method, **kwargs
+        )
         self.encoding_method = encoding_method
 
     def run(self, df_path: str, output_path: str):
@@ -192,7 +166,7 @@ class Embedder:
         return text_to_encode
 
     def encode(self, text_to_encode: List[str]) -> torch.Tensor:
-        return self.embedding_model.encode_sentences(text_to_encode)
+        return self.embedding_model.encode_sentence(text_to_encode)
 
     @staticmethod
     def save(embeddings: torch.Tensor, output_path: str):
