@@ -23,18 +23,20 @@ class BaseIndexer(ABC):
     def __init__(
         self,
         db_path: str,
-        use_openai: bool,
+        model_type: str,
         model_name: str,
         encoding_method: str = None,
         **kwargs,
     ):
         self.db_path = db_path
-        if use_openai:
+        if model_type == "open-ai":
             self.embedding_model = OpenAIEmbeddingModel(model_name=model_name)
-        else:
+        elif model_type == "sentence-transformers":
             self.embedding_model = SentenceTransformerEmbeddingModel(
                 model_name=model_name, encoding_method=encoding_method, **kwargs
             )
+        else:
+            raise ValueError(f"Unknown model type {model_type}")
 
     def run(self, **kwargs) -> BaseDocIndex:
         docs = self.create_doc_vec()
@@ -53,7 +55,7 @@ class BaseIndexer(ABC):
         return docs
 
     @abstractmethod
-    def create_index(self, docs: DocVec[DocPaper], **kwargs):
+    def create_index(self, docs: DocVec[DocPaper], **kwargs) -> BaseDocIndex:
         raise NotImplementedError("This method should be implemented in a child class.")
 
 
@@ -76,12 +78,12 @@ class InMemoryIndexer(BaseIndexer):
     def __init__(
         self,
         db_path: str,
-        use_openai: bool,
+        model_type: str,
         model_name: str,
         encoding_method: str,
         **kwargs,
     ):
-        super().__init__(db_path, use_openai, model_name, encoding_method, **kwargs)
+        super().__init__(db_path, model_type, model_name, encoding_method, **kwargs)
 
     def create_index(
         self, docs: DocVec[DocPaper], index_file_path: str
@@ -100,12 +102,12 @@ class QdrantIndexer(BaseIndexer):
     def __init__(
         self,
         db_path: str,
-        use_openai: bool,
+        model_type: str,
         model_name: str,
         encoding_method: str,
         **kwargs,
     ):
-        super().__init__(db_path, use_openai, model_name, encoding_method, **kwargs)
+        super().__init__(db_path, model_type, model_name, encoding_method, **kwargs)
 
     def create_index(
         self,
@@ -134,10 +136,15 @@ class SimpleIndexer:
     COLUMNS = ["id", "title", "abstract", "pdf_url", "created"]
     ENCODING_METHODS = ["title", "abstract", "concat"]
 
-    def __init__(self, model_name: str, encoding_method: str, **kwargs):
-        self.embedding_model = SentenceTransformerEmbeddingModel(
-            model_name=model_name, encoding_method=encoding_method, **kwargs
-        )
+    def __init__(self, model_type: str, model_name: str, encoding_method: str, **kwargs):
+        if model_type == "open-ai":
+            self.embedding_model = OpenAIEmbeddingModel(model_name=model_name)
+        elif model_type == "sentence-transformers":
+            self.embedding_model = SentenceTransformerEmbeddingModel(
+                model_name=model_name, encoding_method=encoding_method, **kwargs
+            )
+        else:
+            raise ValueError(f"Unknown model type {model_type}")
         self.encoding_method = encoding_method
         self._df = None
         self._embeddings = None

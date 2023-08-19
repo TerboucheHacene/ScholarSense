@@ -1,11 +1,21 @@
 import argparse
 import os
 
-from scholar_sense.data.indexing import Embedder
+from scholar_sense.data.indexing import SimpleIndexer
 
 
-def main(df_path: str, model_name: str, encoding_method: str, output_path: str):
-    embedder = Embedder(model_name, encoding_method)
+def main(
+    df_path: str,
+    model_type: str,
+    model_name: str,
+    encoding_method: str,
+    output_path: str,
+):
+    embedder = SimpleIndexer(
+        model_type=model_type,
+        model_name=model_name,
+        encoding_method=encoding_method,
+    )
     embedder.run(df_path, output_path)
 
 
@@ -16,6 +26,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         required=True,
         help="Path to the CSV file containing the papers",
+    )
+    args_parser.add_argument(
+        "--model_type",
+        type=str,
+        required=True,
+        help="Type of the model to use for embedding the papers",
     )
     args_parser.add_argument(
         "--model_name",
