@@ -1,7 +1,6 @@
 import argparse
 import os
 from collections import defaultdict
-from pathlib import Path
 
 import streamlit as st
 from docarray.index import QdrantDocumentIndex
@@ -10,13 +9,14 @@ from docarray.index.backends.in_memory import InMemoryExactNNIndex
 
 from scholar_sense.apps.constants import ABOUT, BACKGROUND_URL_IMAGE, HOW_TO_USE, MADE_BY
 from scholar_sense.apps.utils import add_bg_from_url
+from scholar_sense.data.indexing import SimpleIndexer
 from scholar_sense.data.schemas import DocPaper
-from scholar_sense.nn.models import SentenceTransformerEmbeddingModel
+from scholar_sense.nn import EmbeddingModel, embedding_models
 
 
 def main(
     doc_index: BaseDocIndex,
-    embedding_model: SentenceTransformerEmbeddingModel,
+    embedding_model: EmbeddingModel,
     topK: int,
 ):
     st.set_page_config(
@@ -55,8 +55,8 @@ def main(
     if submit_button:
         if query == "" or query == " " or len(query) < 3:
             st.error("Please enter a query")
-            st.session_state["paper_recommendations"] = None
-            st.session_state["order_indices"] = None
+            st.session_state["paper_recommendations"] = defaultdict(lambda: [])
+            st.session_state["order_indices"] = []
         else:
             # Clear previous results before adding new ones
             st.session_state["paper_recommendations"] = defaultdict(lambda: [])
@@ -102,34 +102,44 @@ def main(
                 )
 
 
-def main_in_memory(topK: int):
-    index_file_path = Path(
-        "/home/hacene/Documents/workspace/ScholarSense/artifacts/embeddings/docs.bin"
+def run(
+    backend: str,
+    topK: int,
+    model_type: str,
+    model_name: str,
+    encoding_method: str,
+    collection_name: str = None,
+    index_file_path: str = None,
+    csv_file_path: str = None,
+    embedding_file_path: str = None,
+):
+    embedding_model = embedding_models[model_type](
+        model_name=model_name, encoding_method=encoding_method
     )
-    model_name = "all-MiniLM-L6-v2"
-    doc_index = InMemoryExactNNIndex[DocPaper](index_file_path=index_file_path)
-    embedding_model = SentenceTransformerEmbeddingModel(
-        model_name=model_name, encoding_method="title"
-    )
-    main(doc_index=doc_index, embedding_model=embedding_model, topK=topK)
+    if backend == "in_memory":
+        doc_index = InMemoryExactNNIndex[DocPaper](index_file_path=index_file_path)
+    elif backend == "qdrant":
+        doc_index = QdrantDocumentIndex[DocPaper](
+            host=os.getenv("QDRANT_HOST", "localhost"),
+            port=int(os.getenv("QDRANT_PORT", 6333)),
+            collection_name=collection_name,
+            default_column_config={
+                "id": {},
+                "vector": {"dim": embedding_model.embedding_size},
+                "payload": {},
+            },
+        )
 
+    elif backend == "simple":
+        doc_index = SimpleIndexer(model_name=model_name, encoding_method=encoding_method)
+        doc_index.df = csv_file_path
+        doc_index.embeddings = embedding_file_path
+        embedding_model = embedding_models[model_type](
+            model_name=model_name, encoding_method=encoding_method
+        )
 
-def main_qdrant(topK: int):
-    model_name = "all-MiniLM-L6-v2"
-    collection_name = "papers"
-    embedding_model = SentenceTransformerEmbeddingModel(
-        model_name=model_name, encoding_method="title"
-    )
-    doc_index = QdrantDocumentIndex[DocPaper](
-        host=os.getenv("QDRANT_HOST", "localhost"),
-        port=int(os.getenv("QDRANT_PORT", 6333)),
-        collection_name=collection_name,
-        default_column_config={
-            "id": {},
-            "vector": {"dim": embedding_model.embedding_size},
-            "payload": {},
-        },
-    )
+    else:
+        raise ValueError(f"Unknown backend {backend}")
     main(doc_index=doc_index, embedding_model=embedding_model, topK=topK)
 
 
@@ -147,15 +157,62 @@ def parse_args():
         default=15,
         help="Number of results to return",
     )
+    parser.add_argument(
+        "--model-type",
+        type=str,
+        default="sentence-transformers",
+        help="Type of model to use for the embeddings",
+    )
+    parser.add_argument(
+        "--model-name",
+        type=str,
+        default="all-MiniLM-L6-v2",
+        help="Name of the model to use for the embeddings",
+    )
+    parser.add_argument(
+        "--encoding-method",
+        type=str,
+        default="title",
+        help="Encoding method to use for the embeddings",
+    )
+    parser.add_argument(
+        "--collection-name",
+        type=str,
+        required=False,
+        help="Name of the collection to use for the index",
+    )
+    parser.add_argument(
+        "--index-file-path",
+        type=str,
+        required=False,
+        help="Path to the index file to use for the index",
+    )
+    parser.add_argument(
+        "--csv-file-path",
+        type=str,
+        required=False,
+        help="Path to the csv file contaning the data",
+    )
+    parser.add_argument(
+        "--embeddings-file-path",
+        type=str,
+        required=False,
+        help="Path to the embeddings pickle file",
+    )
     args = parser.parse_args()
     return args
 
 
 if __name__ == "__main__":
     args = parse_args()
-    if args.backend == "in_memory":
-        main_in_memory(topK=args.topK)
-    elif args.backend == "qdrant":
-        main_qdrant(topK=args.topK)
-    else:
-        raise ValueError("Unknown backend")
+    run(
+        backend=args.backend,
+        topK=args.topK,
+        model_type=args.model_type,
+        model_name=args.model_name,
+        encoding_method=args.encoding_method,
+        collection_name=args.collection_name,
+        index_file_path=args.index_file_path,
+        csv_file_path=args.csv_file_path,
+        embedding_file_path=args.embeddings_file_path,
+    )
