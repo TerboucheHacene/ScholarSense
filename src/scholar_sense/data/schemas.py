@@ -66,6 +66,19 @@ class Paper:
         return cls(**dict)
 
 
+@dataclass
+class SearchResult:
+    id: str
+    title: str
+    abstract: str
+    pdf_url: str
+    created: datetime.date
+
+    @classmethod
+    def from_dict(cls, dict: Dict) -> "SearchResult":
+        return cls(**dict)
+
+
 class DocPaper(BaseDoc):
     id: str
     title: str
