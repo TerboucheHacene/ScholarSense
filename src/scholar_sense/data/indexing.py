@@ -2,7 +2,7 @@ import logging
 import os
 import pickle
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Tuple
 
 import pandas as pd
 import torch
@@ -10,8 +10,9 @@ from docarray import DocVec
 from docarray.index import QdrantDocumentIndex
 from docarray.index.abstract import BaseDocIndex
 from docarray.index.backends.in_memory import InMemoryExactNNIndex
+from sentence_transformers import util
 
-from scholar_sense.data.schemas import DocPaper
+from scholar_sense.data.schemas import DocPaper, SearchResult
 from scholar_sense.nn.models import (
     OpenAIEmbeddingModel,
     SentenceTransformerEmbeddingModel,
@@ -56,6 +57,7 @@ class BaseIndexer(ABC):
         raise NotImplementedError("This method should be implemented in a child class.")
 
 
+@BaseIndexer.register
 class InMemoryIndexer(BaseIndexer):
     """Class to index the papers in the database.
 
@@ -82,7 +84,7 @@ class InMemoryIndexer(BaseIndexer):
         super().__init__(db_path, use_openai, model_name, encoding_method, **kwargs)
 
     def create_index(
-        self, index_file_path: str, docs: DocVec[DocPaper]
+        self, docs: DocVec[DocPaper], index_file_path: str
     ) -> InMemoryExactNNIndex:
         if os.path.exists(index_file_path):
             logging.warning(f"Index file {index_file_path} already exists. Deleting...")
@@ -93,6 +95,7 @@ class InMemoryIndexer(BaseIndexer):
         return docs_index
 
 
+@BaseIndexer.register
 class QdrantIndexer(BaseIndexer):
     def __init__(
         self,
@@ -106,10 +109,10 @@ class QdrantIndexer(BaseIndexer):
 
     def create_index(
         self,
+        docs: DocVec[DocPaper],
         host: str,
         port: int,
         collection_name: str,
-        docs: DocVec[DocPaper],
     ) -> QdrantDocumentIndex:
         qdarnt_config = QdrantDocumentIndex.DBConfig(
             host=host,
@@ -127,8 +130,8 @@ class QdrantIndexer(BaseIndexer):
         return docs_index
 
 
-class Embedder:
-    COLUMNS = ["title", "abstract"]
+class SimpleIndexer:
+    COLUMNS = ["id", "title", "abstract", "pdf_url", "created"]
     ENCODING_METHODS = ["title", "abstract", "concat"]
 
     def __init__(self, model_name: str, encoding_method: str, **kwargs):
@@ -136,6 +139,24 @@ class Embedder:
             model_name=model_name, encoding_method=encoding_method, **kwargs
         )
         self.encoding_method = encoding_method
+        self._df = None
+        self._embeddings = None
+
+    @property
+    def df(self):
+        return self._df
+
+    @df.setter
+    def df(self, df_path: str):
+        self._df = self.read_data(df_path)
+
+    @property
+    def embeddings(self):
+        return self._embeddings
+
+    @embeddings.setter
+    def embeddings(self, emb_path: str):
+        self._embeddings = self.load(emb_path)
 
     def run(self, df_path: str, output_path: str):
         if os.path.exists(output_path):
@@ -144,6 +165,7 @@ class Embedder:
         df = self.read_data(df_path)
         text_to_encode = self.get_text_to_encode(df)
         embeddings = self.encode(text_to_encode)
+        self._embeddings = embeddings
         self.save(embeddings, output_path)
 
     def read_data(self, df_path) -> pd.DataFrame:
@@ -152,6 +174,7 @@ class Embedder:
             if col not in df.columns:
                 raise ValueError(f"Column {col} not found in {df_path}")
         df = df[[col for col in self.COLUMNS]]
+        self._df = df
         return df
 
     def get_text_to_encode(self, df: pd.DataFrame) -> List[str]:
@@ -178,3 +201,24 @@ class Embedder:
         with open(embeddings_path, "rb") as f:
             embeddings = pickle.load(f)
         return embeddings
+
+    def find(
+        self, query: torch.Tensor, search_field: str, limit: int
+    ) -> Tuple[List[int], List[float]]:
+        if search_field != "embedding":
+            raise ValueError(f"Search field {search_field} not supported.")
+        if self._embeddings is None:
+            raise ValueError("Embeddings not loaded.")
+        if self._embeddings.device != query.device:
+            query = query.to(self._embeddings.device)
+
+        cosine_scores = util.cos_sim(self.embeddings, query)
+        search_hits = torch.topk(cosine_scores, dim=0, k=limit, sorted=True)
+        values = search_hits.values.cpu().numpy().squeeze().tolist()
+        indices = search_hits.indices.cpu().numpy().squeeze().tolist()
+        items = []
+        for idx in indices:
+            paper = SearchResult.from_dict(self.df.iloc[idx].to_dict())
+            items.append(paper)
+
+        return items, values
