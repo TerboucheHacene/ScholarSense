@@ -1,7 +1,10 @@
 import logging
 import os
+import time
 from abc import ABC, abstractmethod, abstractproperty
+from typing import List, Union
 
+import numpy as np
 import openai
 import torch
 from docarray import DocVec
@@ -32,6 +35,7 @@ class EmbeddingModel(ABC):
         pass
 
 
+@EmbeddingModel.register
 class OpenAIEmbeddingModel(EmbeddingModel):
     MODELS = [
         "text-embedding-ada-002",
@@ -55,7 +59,9 @@ class OpenAIEmbeddingModel(EmbeddingModel):
         "text-search-ada-001": 2046,
     }
 
-    def __init__(self, model_name: str) -> None:
+    def __init__(
+        self, model_name: str, batch_size: int = 128, max_tries: int = 5, **kwargs
+    ) -> None:
         if model_name not in self.MODELS:
             raise ValueError(
                 f"Model name must be one of {self.MODELS}, got {model_name}."
@@ -81,6 +87,8 @@ class OpenAIEmbeddingModel(EmbeddingModel):
                 f"Sequence length for model {model_name} not found. Please add it to the"
                 "SEQUENCE_LENGTHS dictionary."
             )
+        self.batch_size = batch_size
+        self.max_tries = max_tries
 
     @property
     def embedding_size(self):
@@ -93,21 +101,45 @@ class OpenAIEmbeddingModel(EmbeddingModel):
     def encode(self, docs: DocVec[DocPaper]) -> DocVec[DocPaper]:
         docs.embedding = torch.zeros((len(docs), self.embedding_size))
         logging.info("Encoding OpenAI")
-        for index in trange(0, len(docs), 1, desc="Encoding OpenAI"):
-            text = docs.title[index] + docs.abstract[index]
-            docs.embedding[index] = self.encode_sentence(text)
-        torch.save(docs.embedding, "openai_embeddings.pt")
+        for i in trange(0, len(docs), self.batch_size, desc="Encoding OpenAI"):
+            text = [
+                *zip(
+                    docs.title[i : i + self.batch_size],
+                    docs.abstract[i : i + self.batch_size],
+                )
+            ]
+            text = [t[0] + t[1] for t in text]
+            for j in range(self.max_tries):
+                try:
+                    docs.embedding[i : i + self.batch_size] = self.encode_sentence(text)
+                    break
+                except Exception as e:
+                    logging.error(f"Failed to encode batch: {e}")
+                    time.sleep(10)
+                    continue
+            if j == self.max_tries - 1:
+                logging.error("Failed to encode batch")
+                break
+
+            time.sleep(10)
         return docs
 
-    def encode_sentence(self, text: str) -> torch.Tensor:
-        text = text.replace("\n", " ")
-        emb = openai.Embedding.create(input=[text], model=self.model_name)["data"][0][
-            "embedding"
-        ]
-        emb = torch.tensor(emb)
+    def encode_sentence(self, text: Union[str, List]) -> torch.Tensor:
+        if isinstance(text, str):
+            text = [text]
+        text = [t.replace("\n", " ") for t in text]
+        data = openai.Embedding.create(input=text, model=self.model_name)["data"]
+        emb = []
+        for d in data:
+            emb.append(np.array(d["embedding"]))
+        emb = np.array(emb)
+        emb = torch.from_numpy(emb)
+        if emb.shape[0] == 1:
+            emb = emb.squeeze(0)
         return emb
 
 
+@EmbeddingModel.register
 class SentenceTransformerEmbeddingModel(EmbeddingModel):
     ENCODINGS_METHODS = [
         "title",
@@ -124,6 +156,7 @@ class SentenceTransformerEmbeddingModel(EmbeddingModel):
         "distilbert-base-nli-mean-tokens",
         "distilbert-base-nli-stsb-mean-tokens",
         "roberta-base-nli-stsb-mean-tokens",
+        "roberta-large-nli-stsb-mean-tokens",
     ]
 
     def __init__(
@@ -133,6 +166,7 @@ class SentenceTransformerEmbeddingModel(EmbeddingModel):
         batch_size: int = 256,
         normalize_embeddings: bool = True,
         words_sequence_length: int = 300,
+        **kwargs,
     ) -> None:
         super().__init__()
         if encoding_method not in self.ENCODINGS_METHODS:
