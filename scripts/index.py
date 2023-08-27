@@ -23,10 +23,10 @@ def main(
         encoding_method=encoding_method,
     )
     if indexing_method == "qdrant":
-        logging.info(f"Indexing papers from {args.db_path} to Qdrant")
+        logging.info(f"Indexing papers from {db_path} to Qdrant")
         indexer.run(host=host, port=port, collection_name=collection_name)
     elif indexing_method == "in_memory":
-        logging.info(f"Indexing papers from {args.db_path} to in-memory index")
+        logging.info(f"Indexing papers from {db_path} to in-memory index")
         indexer.run(index_file_path=index_file_path)
 
 

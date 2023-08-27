@@ -2,7 +2,7 @@ import logging
 import os
 import pickle
 from abc import ABC, abstractmethod
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import pandas as pd
 import torch
@@ -12,6 +12,12 @@ from docarray.index.abstract import BaseDocIndex
 from docarray.index.backends.in_memory import InMemoryExactNNIndex
 from sentence_transformers import util
 
+from scholar_sense.data.enums import (
+    EncodingMethod,
+    ModelType,
+    OpenAIModel,
+    SentenceTransformersModel,
+)
 from scholar_sense.data.schemas import DocPaper, SearchResult
 from scholar_sense.nn.models import (
     OpenAIEmbeddingModel,
@@ -23,20 +29,25 @@ class BaseIndexer(ABC):
     def __init__(
         self,
         db_path: str,
-        model_type: str,
-        model_name: str,
-        encoding_method: str = None,
+        model_type: ModelType,
+        model_name: Union[OpenAIModel, SentenceTransformersModel],
+        encoding_method: str = EncodingMethod,
         **kwargs,
     ):
         self.db_path = db_path
-        if model_type == "open-ai":
+        self.model_type = model_type
+        self.model_name = model_name
+        self.encoding_method = encoding_method
+        if model_type == ModelType.OPEN_AI:
+            if model_name not in ModelType.OPEN_AI.value:
+                raise ValueError(f"Unknown model name {model_name}")
             self.embedding_model = OpenAIEmbeddingModel(model_name=model_name)
-        elif model_type == "sentence-transformers":
+        elif model_type == ModelType.SENTENCE_TRANSFORMERS:
+            if model_name not in ModelType.SENTENCE_TRANSFORMERS.value:
+                raise ValueError(f"Unknown model name {model_name}")
             self.embedding_model = SentenceTransformerEmbeddingModel(
                 model_name=model_name, encoding_method=encoding_method, **kwargs
             )
-        else:
-            raise ValueError(f"Unknown model type {model_type}")
 
     def run(self, **kwargs) -> BaseDocIndex:
         docs = self.create_doc_vec()
@@ -78,9 +89,9 @@ class InMemoryIndexer(BaseIndexer):
     def __init__(
         self,
         db_path: str,
-        model_type: str,
-        model_name: str,
-        encoding_method: str,
+        model_type: ModelType,
+        model_name: Union[OpenAIModel, SentenceTransformersModel],
+        encoding_method: EncodingMethod,
         **kwargs,
     ):
         super().__init__(db_path, model_type, model_name, encoding_method, **kwargs)
@@ -102,9 +113,9 @@ class QdrantIndexer(BaseIndexer):
     def __init__(
         self,
         db_path: str,
-        model_type: str,
-        model_name: str,
-        encoding_method: str,
+        model_type: ModelType,
+        model_name: Union[OpenAIModel, SentenceTransformersModel],
+        encoding_method: EncodingMethod,
         **kwargs,
     ):
         super().__init__(db_path, model_type, model_name, encoding_method, **kwargs)
@@ -136,15 +147,15 @@ class SimpleIndexer:
     COLUMNS = ["id", "title", "abstract", "pdf_url", "created"]
     ENCODING_METHODS = ["title", "abstract", "concat"]
 
-    def __init__(self, model_type: str, model_name: str, encoding_method: str, **kwargs):
-        if model_type == "open-ai":
-            self.embedding_model = OpenAIEmbeddingModel(model_name=model_name)
-        elif model_type == "sentence-transformers":
-            self.embedding_model = SentenceTransformerEmbeddingModel(
-                model_name=model_name, encoding_method=encoding_method, **kwargs
-            )
-        else:
-            raise ValueError(f"Unknown model type {model_type}")
+    def __init__(
+        self,
+        model_type: ModelType,
+        model_name: Union[OpenAIModel, SentenceTransformersModel],
+        encoding_method: EncodingMethod,
+        **kwargs,
+    ):
+        self.model_type = model_type
+        self.model_name = model_name
         self.encoding_method = encoding_method
         self._df = None
         self._embeddings = None
@@ -187,11 +198,11 @@ class SimpleIndexer:
     def get_text_to_encode(self, df: pd.DataFrame) -> List[str]:
         text_to_encode = []
         for _, row in df.iterrows():
-            if self.encoding_method == "title":
+            if self.encoding_method == EncodingMethod.TITLE:
                 text_to_encode.append(row["title"])
-            elif self.encoding_method == "abstract":
+            elif self.encoding_method == EncodingMethod.ABSTRACT:
                 text_to_encode.append(row["abstract"])
-            elif self.encoding_method == "concat":
+            elif self.encoding_method == EncodingMethod.CONCAT:
                 text_to_encode.append(f"{row['title']} [SEP] {row['abstract']}")
         return text_to_encode
 

@@ -1,6 +1,7 @@
 import argparse
 import os
 from collections import defaultdict
+from typing import Union
 
 import streamlit as st
 from docarray.index import QdrantDocumentIndex
@@ -9,9 +10,18 @@ from docarray.index.backends.in_memory import InMemoryExactNNIndex
 
 from scholar_sense.apps.constants import ABOUT, BACKGROUND_URL_IMAGE, HOW_TO_USE, MADE_BY
 from scholar_sense.apps.utils import add_bg_from_url
+from scholar_sense.data.enums import (
+    EncodingMethod,
+    IndexingMethod,
+    ModelType,
+    OpenAIModel,
+    SentenceTransformersModel,
+    SimpleEncodingMethod,
+)
 from scholar_sense.data.indexing import SimpleIndexer
 from scholar_sense.data.schemas import DocPaper
-from scholar_sense.nn import EmbeddingModel, embedding_models
+from scholar_sense.nn import embedding_models
+from scholar_sense.nn.models import EmbeddingModel
 
 
 def main(
@@ -102,12 +112,12 @@ def main(
                 )
 
 
-def run(
-    backend: str,
+def run_app(
+    backend: IndexingMethod,
+    model_type: ModelType,
+    model_name: Union[OpenAIModel, SentenceTransformersModel],
+    encoding_method: Union[EncodingMethod, SimpleEncodingMethod],
     topK: int,
-    model_type: str,
-    model_name: str,
-    encoding_method: str,
     collection_name: str = None,
     index_file_path: str = None,
     csv_file_path: str = None,
@@ -116,9 +126,9 @@ def run(
     embedding_model = embedding_models[model_type](
         model_name=model_name, encoding_method=encoding_method
     )
-    if backend == "in_memory":
+    if backend == IndexingMethod.IN_MEMORY:
         doc_index = InMemoryExactNNIndex[DocPaper](index_file_path=index_file_path)
-    elif backend == "qdrant":
+    elif backend == IndexingMethod.QDRANT:
         doc_index = QdrantDocumentIndex[DocPaper](
             host=os.getenv("QDRANT_HOST", "localhost"),
             port=int(os.getenv("QDRANT_PORT", 6333)),
@@ -130,8 +140,10 @@ def run(
             },
         )
 
-    elif backend == "simple":
-        doc_index = SimpleIndexer(model_name=model_name, encoding_method=encoding_method)
+    elif backend == IndexingMethod.SIMPLE:
+        doc_index = SimpleIndexer(
+            model_type=model_type, model_name=model_name, encoding_method=encoding_method
+        )
         doc_index.df = csv_file_path
         doc_index.embeddings = embedding_file_path
         embedding_model = embedding_models[model_type](
@@ -143,7 +155,7 @@ def run(
     main(doc_index=doc_index, embedding_model=embedding_model, topK=topK)
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--backend",
@@ -152,7 +164,7 @@ def parse_args():
         help="Backend to use for the index. Either `in_memory` or `qdrant`",
     )
     parser.add_argument(
-        "--topK",
+        "--limit",
         type=int,
         default=15,
         help="Number of results to return",
@@ -203,11 +215,39 @@ def parse_args():
     return args
 
 
+def check_args(args: argparse.Namespace) -> argparse.Namespace:
+    try:
+        args.backend = IndexingMethod[args.backend.upper()]
+    except KeyError:
+        raise ValueError(f"Unknown backend {args.backend} for the index")
+    try:
+        args.model_type = ModelType[args.model_type.upper()]
+    except KeyError:
+        raise ValueError(f"Unknown model type {args.model_type}")
+    try:
+        args.model_name = args.model_type.value[args.model_name.upper()]
+    except KeyError:
+        raise ValueError(f"Unknown model name {args.model_name} for {args.model_type}")
+    try:
+        if args.backend == IndexingMethod.SIMPLE:
+            args.encoding_method = SimpleEncodingMethod[args.encoding_method.upper()]
+        else:
+            args.encoding_method = EncodingMethod[args.encoding_method.upper()]
+    except KeyError:
+        raise ValueError(f"Unknown encoding method {args.encoding_method}")
+    return args
+
+
 if __name__ == "__main__":
     args = parse_args()
-    run(
+    for arg in vars(args):
+        if isinstance(getattr(args, arg), str):
+            setattr(args, arg, getattr(args, arg).lower().replace("-", "_"))
+    args = check_args(args)
+
+    run_app(
         backend=args.backend,
-        topK=args.topK,
+        topK=args.limit,
         model_type=args.model_type,
         model_name=args.model_name,
         encoding_method=args.encoding_method,

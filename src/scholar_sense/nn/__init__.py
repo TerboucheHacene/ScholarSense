@@ -1,9 +1,12 @@
+from scholar_sense.data.enums import ModelType, ModelTypeCLI
 from scholar_sense.nn.models import (
     OpenAIEmbeddingModel,
     SentenceTransformerEmbeddingModel,
 )
 
 embedding_models = {
-    "sentence-transformers": SentenceTransformerEmbeddingModel,
-    "open-ai": OpenAIEmbeddingModel,
+    ModelType.OPEN_AI: OpenAIEmbeddingModel,
+    ModelTypeCLI.OPEN_AI: OpenAIEmbeddingModel,
+    ModelType.SENTENCE_TRANSFORMERS: SentenceTransformerEmbeddingModel,
+    ModelTypeCLI.SENTENCE_TRANSFORMERS: SentenceTransformerEmbeddingModel,
 }

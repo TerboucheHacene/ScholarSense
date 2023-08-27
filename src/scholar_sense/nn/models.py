@@ -11,6 +11,11 @@ from docarray import DocVec
 from sentence_transformers import SentenceTransformer
 from tqdm.autonotebook import trange
 
+from scholar_sense.data.enums import (
+    EncodingMethod,
+    OpenAIModel,
+    SentenceTransformersModel,
+)
 from scholar_sense.data.schemas import DocPaper
 
 
@@ -37,13 +42,6 @@ class EmbeddingModel(ABC):
 
 @EmbeddingModel.register
 class OpenAIEmbeddingModel(EmbeddingModel):
-    MODELS = [
-        "text-embedding-ada-002",
-        "text-search-davinci-001",
-        "text-search-curie-001",
-        "text-search-babbage-001",
-        "text-search-ada-001",
-    ]
     EMBEDDING_SIZES = {
         "text-embedding-ada-002": 1536,
         "text-search-davinci-001": 12288,
@@ -60,12 +58,12 @@ class OpenAIEmbeddingModel(EmbeddingModel):
     }
 
     def __init__(
-        self, model_name: str, batch_size: int = 128, max_tries: int = 5, **kwargs
+        self,
+        model_name: OpenAIModel,
+        batch_size: int = 128,
+        max_tries: int = 5,
+        **kwargs,
     ) -> None:
-        if model_name not in self.MODELS:
-            raise ValueError(
-                f"Model name must be one of {self.MODELS}, got {model_name}."
-            )
         self.model_name = model_name
         try:
             openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -74,14 +72,14 @@ class OpenAIEmbeddingModel(EmbeddingModel):
                 "Please set OPENAI_API_KEY environment variable to use OpenAI API."
             )
         try:
-            self._embedding_size = self.EMBEDDING_SIZES[model_name]
+            self._embedding_size = self.EMBEDDING_SIZES[model_name.value]
         except KeyError:
             raise KeyError(
                 f"Embedding size for model {model_name} not found. Please add it to the"
                 "EMBEDDING_SIZES dictionary."
             )
         try:
-            self._sequence_length = self.SEQUENCE_LENGTHS[model_name]
+            self._sequence_length = self.SEQUENCE_LENGTHS[model_name.value]
         except KeyError:
             raise KeyError(
                 f"Sequence length for model {model_name} not found. Please add it to the"
@@ -128,7 +126,7 @@ class OpenAIEmbeddingModel(EmbeddingModel):
         if isinstance(text, str):
             text = [text]
         text = [t.replace("\n", " ") for t in text]
-        data = openai.Embedding.create(input=text, model=self.model_name)["data"]
+        data = openai.Embedding.create(input=text, model=self.model_name.value)["data"]
         emb = []
         for d in data:
             emb.append(np.array(d["embedding"]))
@@ -141,44 +139,19 @@ class OpenAIEmbeddingModel(EmbeddingModel):
 
 @EmbeddingModel.register
 class SentenceTransformerEmbeddingModel(EmbeddingModel):
-    ENCODINGS_METHODS = [
-        "title",
-        "abstract",
-        "mean",
-        "concat",
-        "sliding_window_abstract",
-        "sliding_window_mean",
-    ]
-    MODELS = [
-        "all-MiniLM-L6-v2",
-        "bert-base-nli-mean-tokens",
-        "roberta-base-nli-mean-tokens",
-        "distilbert-base-nli-mean-tokens",
-        "distilbert-base-nli-stsb-mean-tokens",
-        "roberta-base-nli-stsb-mean-tokens",
-        "roberta-large-nli-stsb-mean-tokens",
-    ]
-
     def __init__(
         self,
-        model_name: str,
-        encoding_method: str,
+        model_name: SentenceTransformersModel,
+        encoding_method: EncodingMethod,
         batch_size: int = 256,
         normalize_embeddings: bool = True,
         words_sequence_length: int = 300,
         **kwargs,
     ) -> None:
         super().__init__()
-        if encoding_method not in self.ENCODINGS_METHODS:
-            raise ValueError(
-                f"Encoding method must be one of {self.ENCODINGS_METHODS}, got {encoding_method}."  # noqa
-            )
-        if model_name not in self.MODELS:
-            raise ValueError(
-                f"Model name must be one of {self.MODELS}, got {model_name}."
-            )
-
-        self.model = SentenceTransformer(model_name)
+        self.encoding_method = encoding_method
+        self.model_name = model_name
+        self.model = SentenceTransformer(self.model_name.value)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.batch_size = batch_size
         self.normalize_embeddings = normalize_embeddings
@@ -195,17 +168,17 @@ class SentenceTransformerEmbeddingModel(EmbeddingModel):
         return self._sequence_length
 
     def encode(self, docs: DocVec[DocPaper]) -> DocVec[DocPaper]:
-        if self.encoding_method == "title":
+        if self.encoding_method == EncodingMethod.TITLE:
             docs = self.embedding_model.encode_title(docs)
-        elif self.encoding_method == "abstract":
+        elif self.encoding_method == EncodingMethod.ABSTRACT:
             docs = self.embedding_model.encode_abstract(docs)
-        elif self.encoding_method == "mean":
+        elif self.encoding_method == EncodingMethod.MEAN:
             docs = self.embedding_model.encode_mean(docs)
-        elif self.encoding_method == "concat":
+        elif self.encoding_method == EncodingMethod.CONCAT:
             docs = self.embedding_model.encode_concat(docs)
-        elif self.encoding_method == "sliding_window_abstract":
+        elif self.encoding_method == EncodingMethod.SLIDING_WINDOW_ABSTRACT:
             docs = self.embedding_model.encode_sliding_window_abstract(docs)
-        elif self.encoding_method == "sliding_window_mean":
+        elif self.encoding_method == EncodingMethod.SLIDING_WINDOW_MEAN:
             docs = self.embedding_model.encode_sliding_window_mean(docs)
         return docs
 
